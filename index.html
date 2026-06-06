@@ -113,6 +113,64 @@ textarea:focus { border-color: var(--accent); }
     text-transform: uppercase;
     letter-spacing: 0.1em;
 }
+.stat-card.readability-card {
+    grid-column: span 2;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    text-align: left;
+    padding: 1rem 1.5rem;
+    border-color: var(--accent-glow);
+    background: var(--accent-subtle);
+}
+.stat-card.readability-card .readability-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+.stat-card.readability-card .readability-score {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--accent-light);
+    font-family: var(--mono);
+    line-height: 1;
+}
+.stat-card.readability-card .readability-grade {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+.stat-card.readability-card .readability-interp {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    max-width: 280px;
+    text-align: right;
+    line-height: 1.4;
+}
+.readability-section {
+    background: var(--surface);
+    border: 1px solid var(--text-muted);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1.2rem;
+}
+.readability-section h3 {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.6rem;
+}
+.readability-details {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+}
+.readability-details span strong {
+    color: var(--text);
+    font-family: var(--mono);
+}
 .progress-section {
     margin-bottom: 1.2rem;
 }
@@ -237,6 +295,22 @@ footer a:hover { color: var(--accent); }
         <div class="stat-value" id="speakingTime">0s</div>
         <div class="stat-label">Speaking (183 wpm)</div>
     </div>
+    <div class="stat-card readability-card" id="readabilityCard">
+        <div class="readability-left">
+            <span class="readability-label" style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.1em">Flesch-Kincaid</span>
+            <span class="readability-score" id="fkScore">—</span>
+            <span class="readability-grade" id="fkGrade">—</span>
+        </div>
+        <div class="readability-interp" id="fkInterpretation">Enter text to see readability score</div>
+    </div>
+</div>
+<div class="readability-section">
+    <h3>Readability Details</h3>
+    <div class="readability-details">
+        <span>Total Syllables: <strong id="fkSyllables">0</strong></span>
+        <span>Avg Words/Sentence: <strong id="fkWordsPerSent">0</strong></span>
+        <span>Avg Syllables/Word: <strong id="fkSyllPerWord">0</strong></span>
+    </div>
 </div>
 <div class="progress-section">
     <div class="progress-item">
@@ -287,6 +361,86 @@ const freqBars = document.getElementById('freqBars');
 const clearBtn = document.getElementById('clearBtn');
 const pasteBtn = document.getElementById('pasteBtn');
 
+// Flesch-Kincaid elements
+const fkScore = document.getElementById('fkScore');
+const fkGrade = document.getElementById('fkGrade');
+const fkInterpretation = document.getElementById('fkInterpretation');
+const fkSyllables = document.getElementById('fkSyllables');
+const fkWordsPerSent = document.getElementById('fkWordsPerSent');
+const fkSyllPerWord = document.getElementById('fkSyllPerWord');
+
+// Heuristic syllable counter: count vowel groups
+function countSyllables(word) {
+    if (!word) return 0;
+    const w = word.toLowerCase().replace(/[^a-z]/g, '');
+    if (w.length === 0) return 0;
+    // Special case: words <= 3 chars often have 1 syllable
+    if (w.length <= 3) return 1;
+    // Count vowel groups
+    const vowels = 'aeiouy';
+    let count = 0;
+    let prevVowel = false;
+    for (const ch of w) {
+        const isVowel = vowels.includes(ch);
+        if (isVowel && !prevVowel) count++;
+        prevVowel = isVowel;
+    }
+    // Adjust for silent 'e' at end (e.g., "make" -> 1 syllable not 2)
+    if (w.endsWith('e') && count > 1 && !w.endsWith('le')) {
+        count--;
+    }
+    // Ensure at least 1 syllable
+    return Math.max(1, count);
+}
+
+function computeReadability(text) {
+    const words = text.trim() ? text.trim().split(/\s+/) : [];
+    const sentences = text ? (text.match(/[.!?]+/g) || []).length : 0;
+    if (words.length === 0 || sentences === 0) {
+        return { score: null, syllables: 0, wordsPerSentence: 0, syllPerWord: 0 };
+    }
+
+    let totalSyllables = 0;
+    for (const w of words) {
+        totalSyllables += countSyllables(w);
+    }
+
+    const wps = words.length / sentences;
+    const spw = totalSyllables / words.length;
+
+    // Flesch Reading Ease: 206.835 - 1.015*(words/sentences) - 84.6*(syllables/words)
+    const score = 206.835 - 1.015 * wps - 84.6 * spw;
+
+    return {
+        score: Math.max(0, Math.min(100, score)),
+        syllables: totalSyllables,
+        wordsPerSentence: wps,
+        syllPerWord: spw
+    };
+}
+
+function getGradeLevel(score) {
+    if (score === null) return '—';
+    if (score >= 90) return '5th Grade';
+    if (score >= 80) return '6th Grade';
+    if (score >= 70) return '7th Grade';
+    if (score >= 60) return '8th-9th Grade';
+    if (score >= 50) return '10th-12th Grade';
+    if (score >= 30) return 'College';
+    return 'College Graduate';
+}
+
+function getInterpretation(score) {
+    if (score === null) return '';
+    if (score >= 90) return 'Very easy to read. Easily understood by an average 11-year-old student.';
+    if (score >= 80) return 'Easy to read. Conversational English for consumers.';
+    if (score >= 70) return 'Fairly easy to read. Plain English — suitable for general audiences.';
+    if (score >= 60) return 'Fairly difficult to read. Suitable for high school students.';
+    if (score >= 50) return 'Difficult to read. Suitable for college students.';
+    if (score >= 30) return 'Very difficult to read. Best understood by university graduates.';
+    return 'Extremely difficult to read. Best understood by university graduates with specialized knowledge.';
+}
+
 function updateStats() {
     const text = textarea.value;
     const charsWith = text.length;
@@ -327,6 +481,22 @@ function updateStats() {
 
     // Character frequency
     updateFreq(text);
+
+    // Flesch-Kincaid readability
+    const fk = computeReadability(text);
+    fkSyllables.textContent = fk.syllables;
+    fkWordsPerSent.textContent = fk.wordsPerSentence.toFixed(1);
+    fkSyllPerWord.textContent = fk.syllPerWord.toFixed(2);
+
+    if (fk.score === null) {
+        fkScore.textContent = '—';
+        fkGrade.textContent = '—';
+        fkInterpretation.textContent = 'Enter text to see readability score';
+    } else {
+        fkScore.textContent = fk.score.toFixed(1);
+        fkGrade.textContent = getGradeLevel(fk.score);
+        fkInterpretation.textContent = getInterpretation(fk.score);
+    }
 }
 
 function updateFreq(text) {
